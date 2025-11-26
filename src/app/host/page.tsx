@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { Logo, Button, Card } from '@/components';
 import { defaultQuiz, generateGameCode } from '@/lib/questions';
 import { useGameStore } from '@/store/gameStore';
-import { createGameSession } from '@/lib/supabase';
+import { saveSession } from '@/lib/gameSync';
 import { v4 as uuidv4 } from 'uuid';
 
 export default function HostPage() {
@@ -20,22 +20,25 @@ export default function HostPage() {
     try {
       const gameCode = generateGameCode();
       const hostId = uuidv4();
+      const sessionId = uuidv4();
 
-      // Create game session in database
-      const dbSession = await createGameSession(quizId, gameCode, hostId);
-
-      // Set up the game session in local state
-      setCurrentQuiz(defaultQuiz);
-      setSession({
-        id: dbSession.id,
+      const gameSession = {
+        id: sessionId,
         code: gameCode,
         quizId: quizId,
         quiz: defaultQuiz,
-        status: 'waiting',
+        status: 'waiting' as const,
         currentQuestionIndex: 0,
         players: [],
         hostId: hostId,
-      });
+      };
+
+      // Save to localStorage for BroadcastChannel sync
+      saveSession(gameSession);
+
+      // Set up the game session in local state
+      setCurrentQuiz(defaultQuiz);
+      setSession(gameSession);
 
       // Navigate to lobby
       router.push(`/host/lobby/${gameCode}`);
