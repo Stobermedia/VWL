@@ -1,9 +1,13 @@
-import { createClient } from '@supabase/supabase-js';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+// Only create client if env vars are set (for production with Supabase)
+// For local demo mode, we use BroadcastChannel and localStorage instead
+export const supabase: SupabaseClient | null = supabaseUrl && supabaseAnonKey
+  ? createClient(supabaseUrl, supabaseAnonKey)
+  : null;
 
 // Types for database tables
 export interface DbQuiz {
@@ -73,6 +77,8 @@ export interface DbPlayerAnswer {
 
 // Helper functions
 export async function getQuizWithQuestions(quizId: string) {
+  if (!supabase) return null;
+
   const { data: quiz, error: quizError } = await supabase
     .from('quizzes')
     .select('*')
@@ -113,6 +119,8 @@ export async function getQuizWithQuestions(quizId: string) {
 }
 
 export async function getDefaultQuiz() {
+  if (!supabase) return null;
+
   const { data: quiz, error } = await supabase
     .from('quizzes')
     .select('id')
@@ -125,6 +133,8 @@ export async function getDefaultQuiz() {
 }
 
 export async function createGameSession(quizId: string, code: string, hostId: string) {
+  if (!supabase) return null;
+
   const { data, error } = await supabase
     .from('game_sessions')
     .insert({
@@ -141,6 +151,8 @@ export async function createGameSession(quizId: string, code: string, hostId: st
 }
 
 export async function getGameSession(code: string) {
+  if (!supabase) return null;
+
   const { data, error } = await supabase
     .from('game_sessions')
     .select('*')
@@ -152,6 +164,8 @@ export async function getGameSession(code: string) {
 }
 
 export async function updateGameSession(sessionId: string, updates: Partial<DbGameSession>) {
+  if (!supabase) return null;
+
   const { data, error } = await supabase
     .from('game_sessions')
     .update(updates)
@@ -164,6 +178,8 @@ export async function updateGameSession(sessionId: string, updates: Partial<DbGa
 }
 
 export async function joinGame(sessionId: string, nickname: string, avatar: string) {
+  if (!supabase) return null;
+
   const { data, error } = await supabase
     .from('players')
     .insert({
@@ -180,6 +196,8 @@ export async function joinGame(sessionId: string, nickname: string, avatar: stri
 }
 
 export async function getSessionPlayers(sessionId: string) {
+  if (!supabase) return [];
+
   const { data, error } = await supabase
     .from('players')
     .select('*')
@@ -191,6 +209,8 @@ export async function getSessionPlayers(sessionId: string) {
 }
 
 export async function updatePlayerScore(playerId: string, score: number) {
+  if (!supabase) return null;
+
   const { data, error } = await supabase
     .from('players')
     .update({ score })
@@ -210,6 +230,8 @@ export async function submitAnswer(
   pointsEarned: number,
   isCorrect: boolean
 ) {
+  if (!supabase) return null;
+
   const { data, error } = await supabase
     .from('player_answers')
     .insert({
@@ -229,6 +251,8 @@ export async function submitAnswer(
 
 // Realtime subscriptions
 export function subscribeToPlayers(sessionId: string, callback: (players: DbPlayer[]) => void) {
+  if (!supabase) return null;
+
   return supabase
     .channel(`players:${sessionId}`)
     .on(
@@ -248,6 +272,8 @@ export function subscribeToPlayers(sessionId: string, callback: (players: DbPlay
 }
 
 export function subscribeToGameSession(code: string, callback: (session: DbGameSession) => void) {
+  if (!supabase) return null;
+
   return supabase
     .channel(`session:${code}`)
     .on(
