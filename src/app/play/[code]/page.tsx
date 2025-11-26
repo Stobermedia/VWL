@@ -7,6 +7,7 @@ import Link from 'next/link';
 import { Logo, Button, Card, Input } from '@/components';
 import { useGameStore } from '@/store/gameStore';
 import { getSession as getStoredSession, addPlayerToSession, saveSession } from '@/lib/gameSync';
+import { getGameSession, joinGame } from '@/lib/supabase';
 import { v4 as uuidv4 } from 'uuid';
 
 const avatars = ['😀', '😎', '🤓', '🥳', '🤠', '👻', '🐱', '🦊', '🐸', '🦄', '🌟', '🔥'];
@@ -25,13 +26,31 @@ export default function JoinGamePage() {
 
   // Check if game exists
   useEffect(() => {
-    if (code) {
-      const session = getStoredSession(code);
-      setGameExists(!!session);
-      if (session) {
-        setSession(session);
+    const checkGameExists = async () => {
+      if (code) {
+        try {
+          // First try to get from database
+          const dbSession = await getGameSession(code);
+          if (dbSession) {
+            setGameExists(true);
+            return;
+          }
+        } catch (error) {
+          console.log('Game not found in database, checking localStorage...');
+        }
+
+        // Fallback to localStorage
+        const session = getStoredSession(code);
+        if (session) {
+          setGameExists(true);
+          setSession(session);
+        } else {
+          setGameExists(false);
+        }
       }
-    }
+    };
+
+    checkGameExists();
   }, [code, setSession]);
 
   const handleJoin = async () => {
@@ -52,48 +71,92 @@ export default function JoinGamePage() {
 
     setIsLoading(true);
 
-    // Check if game session exists
-    const storedSession = getStoredSession(code);
-    if (!storedSession) {
-      setError('Spiel nicht gefunden. Prüfe den Code.');
-      setIsLoading(false);
-      return;
-    }
+    try {
+      // First try to get session from database
+      let dbSession;
+      try {
+        dbSession = await getGameSession(code);
+      } catch (error) {
+        console.log('Database session not found, checking localStorage...');
+      }
 
-    // Check if game already started
-    if (storedSession.status !== 'waiting') {
-      setError('Das Spiel hat bereits begonnen.');
-      setIsLoading(false);
-      return;
-    }
+      // Check if game session exists (database or localStorage)
+      const storedSession = getStoredSession(code);
+      if (!dbSession && !storedSession) {
+        setError('Spiel nicht gefunden. Prüfe den Code.');
+        setIsLoading(false);
+        return;
+      }
 
-    const player = {
-      id: uuidv4(),
-      nickname: nickname.trim(),
-      avatar: selectedAvatar,
-      score: 0,
-    };
+      // Check if game already started
+      const sessionStatus = dbSession?.status || storedSession?.status;
+      if (sessionStatus !== 'waiting') {
+        setError('Das Spiel hat bereits begonnen.');
+        setIsLoading(false);
+        return;
+      }
 
-    // Add player to session in localStorage
-    const updatedSession = addPlayerToSession(code, player);
-    if (updatedSession) {
-      // Update local state
-      setSession(updatedSession);
-      setCurrentPlayer(player);
+      const player = {
+        id: uuidv4(),
+        nickname: nickname.trim(),
+        avatar: selectedAvatar,
+        score: 0,
+      };
 
-      // Broadcast player joined via BroadcastChannel
-      const channel = new BroadcastChannel('pflege-quiz-game');
-      channel.postMessage({
-        type: 'player_joined',
-        code,
-        payload: updatedSession,
-        timestamp: Date.now(),
-      });
-      channel.close();
+      // If we have a database session, join via database
+      if (dbSession) {
+        try {
+          await joinGame(dbSession.id, player.nickname, player.avatar);
+          
+          // Create local session for immediate UI update
+          const localSession = {
+            id: dbSession.id,
+            code: code,
+            quizId: dbSession.quiz_id,
+            status: 'waiting' as const,
+            currentQuestionIndex: 0,
+            players: [player], // Will be updated by real-time sync
+            hostId: dbSession.host_id || '',
+          };
+          
+          setSession(localSession);
+          setCurrentPlayer(player);
+          
+          // Navigate to waiting screen
+          router.push(`/play/${code}/game`);
+        } catch (error) {
+          console.error('Failed to join game:', error);
+          setError('Fehler beim Beitreten. Versuche es erneut.');
+          setIsLoading(false);
+          return;
+        }
+      } else {
+        // Fallback to localStorage method
+        const updatedSession = addPlayerToSession(code, player);
+        if (updatedSession) {
+          // Update local state
+          setSession(updatedSession);
+          setCurrentPlayer(player);
 
-      // Navigate to waiting screen
-      router.push(`/play/${code}/game`);
-    } else {
+          // Broadcast player joined via BroadcastChannel
+          const channel = new BroadcastChannel('pflege-quiz-game');
+          channel.postMessage({
+            type: 'player_joined',
+            code,
+            payload: updatedSession,
+            timestamp: Date.now(),
+          });
+          channel.close();
+
+          // Navigate to waiting screen
+          router.push(`/play/${code}/game`);
+        } else {
+          setError('Fehler beim Beitreten. Versuche es erneut.');
+          setIsLoading(false);
+        }
+      }
+    } catch (error) {
+      console.error('Error joining game:', error);
       setError('Fehler beim Beitreten. Versuche es erneut.');
       setIsLoading(false);
     }

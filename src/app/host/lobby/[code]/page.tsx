@@ -6,6 +6,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { Logo, Button, Card } from '@/components';
 import { useGameStore } from '@/store/gameStore';
 import { useGameChannel, saveSession, getSession as getStoredSession, GameMessage } from '@/lib/gameSync';
+import { getSessionPlayers, subscribeToPlayers, updateGameSession } from '@/lib/supabase';
 import Link from 'next/link';
 
 export default function HostLobbyPage() {
@@ -14,6 +15,7 @@ export default function HostLobbyPage() {
   const code = params.code as string;
   const { session, setSession } = useGameStore();
   const [copied, setCopied] = useState(false);
+  const [dbPlayers, setDbPlayers] = useState<any[]>([]);
 
   // Handle incoming messages from players
   const handleMessage = useCallback((message: GameMessage) => {
@@ -44,25 +46,94 @@ export default function HostLobbyPage() {
     }
   }, [session, code]);
 
-  // Poll for player updates from localStorage
+  // Subscribe to database players and poll localStorage as fallback
   useEffect(() => {
-    if (!code) return;
+    if (!code || !session) return;
 
-    const pollInterval = setInterval(() => {
-      const storedSession = getStoredSession(code);
-      if (storedSession && session) {
-        // Check if players changed
-        if (JSON.stringify(storedSession.players) !== JSON.stringify(session.players)) {
+    let subscription: any = null;
+    let pollInterval: NodeJS.Timeout | null = null;
+
+    const setupDatabaseSync = async () => {
+      try {
+        // Try to get initial players from database
+        const players = await getSessionPlayers(session.id);
+        if (players.length > 0) {
+          setDbPlayers(players);
+          
+          // Convert database players to local format
+          const localPlayers = players.map(p => ({
+            id: p.id,
+            nickname: p.nickname,
+            avatar: p.avatar || '👤',
+            score: p.score,
+          }));
+          
           setSession({
             ...session,
-            players: storedSession.players,
+            players: localPlayers,
           });
-        }
-      }
-    }, 500); // Poll every 500ms
 
-    return () => clearInterval(pollInterval);
-  }, [code, session, setSession]);
+          // Subscribe to real-time updates
+          subscription = subscribeToPlayers(session.id, (updatedPlayers) => {
+            setDbPlayers(updatedPlayers);
+            const localPlayers = updatedPlayers.map(p => ({
+              id: p.id,
+              nickname: p.nickname,
+              avatar: p.avatar || '👤',
+              score: p.score,
+            }));
+            
+            if (session) {
+              setSession({
+                ...session,
+                players: localPlayers,
+              });
+            }
+          });
+        } else {
+          // Fallback to localStorage polling
+          pollInterval = setInterval(() => {
+            const storedSession = getStoredSession(code);
+            if (storedSession && session) {
+              // Check if players changed
+              if (JSON.stringify(storedSession.players) !== JSON.stringify(session.players)) {
+                setSession({
+                  ...session,
+                  players: storedSession.players,
+                });
+              }
+            }
+          }, 500);
+        }
+      } catch (error) {
+        console.log('Database sync failed, using localStorage polling...');
+        // Fallback to localStorage polling
+        pollInterval = setInterval(() => {
+          const storedSession = getStoredSession(code);
+          if (storedSession && session) {
+            // Check if players changed
+            if (JSON.stringify(storedSession.players) !== JSON.stringify(session.players)) {
+              setSession({
+                ...session,
+                players: storedSession.players,
+              });
+            }
+          }
+        }, 500);
+      }
+    };
+
+    setupDatabaseSync();
+
+    return () => {
+      if (subscription) {
+        subscription.unsubscribe();
+      }
+      if (pollInterval) {
+        clearInterval(pollInterval);
+      }
+    };
+  }, [code, session?.id, setSession]);
 
   // Redirect if no session
   useEffect(() => {
@@ -83,24 +154,52 @@ export default function HostLobbyPage() {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const startGame = () => {
+  const startGame = async () => {
     if (session && session.players.length > 0) {
-      const updatedSession = {
-        ...session,
-        status: 'playing' as const,
-        startedAt: new Date(),
-      };
-      setSession(updatedSession);
-      saveSession(updatedSession);
+      try {
+        // Update database if we have database players
+        if (dbPlayers.length > 0) {
+          await updateGameSession(session.id, {
+            status: 'playing',
+            started_at: new Date().toISOString(),
+          });
+        }
 
-      // Broadcast to all players
-      broadcast({
-        type: 'game_started',
-        code,
-        payload: updatedSession,
-      });
+        const updatedSession = {
+          ...session,
+          status: 'playing' as const,
+          startedAt: new Date(),
+        };
+        setSession(updatedSession);
+        saveSession(updatedSession);
 
-      router.push(`/host/game/${code}`);
+        // Broadcast to all players
+        broadcast({
+          type: 'game_started',
+          code,
+          payload: updatedSession,
+        });
+
+        router.push(`/host/game/${code}`);
+      } catch (error) {
+        console.error('Failed to start game:', error);
+        // Fallback to local-only start
+        const updatedSession = {
+          ...session,
+          status: 'playing' as const,
+          startedAt: new Date(),
+        };
+        setSession(updatedSession);
+        saveSession(updatedSession);
+
+        broadcast({
+          type: 'game_started',
+          code,
+          payload: updatedSession,
+        });
+
+        router.push(`/host/game/${code}`);
+      }
     }
   };
 

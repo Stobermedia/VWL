@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { Logo, Button, Card } from '@/components';
 import { defaultQuiz, generateGameCode } from '@/lib/questions';
 import { useGameStore } from '@/store/gameStore';
+import { createGameSession } from '@/lib/supabase';
 import { v4 as uuidv4 } from 'uuid';
 
 export default function HostPage() {
@@ -16,25 +17,34 @@ export default function HostPage() {
   const handleStartQuiz = async (quizId: string) => {
     setIsLoading(true);
 
-    const gameCode = generateGameCode();
-    const sessionId = uuidv4();
-    const hostId = uuidv4();
+    try {
+      const gameCode = generateGameCode();
+      const hostId = uuidv4();
 
-    // Set up the game session
-    setCurrentQuiz(defaultQuiz);
-    setSession({
-      id: sessionId,
-      code: gameCode,
-      quizId: quizId,
-      quiz: defaultQuiz,
-      status: 'waiting',
-      currentQuestionIndex: 0,
-      players: [],
-      hostId: hostId,
-    });
+      // Create game session in database
+      const dbSession = await createGameSession(quizId, gameCode, hostId);
 
-    // Navigate to lobby
-    router.push(`/host/lobby/${gameCode}`);
+      // Set up the game session in local state
+      setCurrentQuiz(defaultQuiz);
+      setSession({
+        id: dbSession.id,
+        code: gameCode,
+        quizId: quizId,
+        quiz: defaultQuiz,
+        status: 'waiting',
+        currentQuestionIndex: 0,
+        players: [],
+        hostId: hostId,
+      });
+
+      // Navigate to lobby
+      router.push(`/host/lobby/${gameCode}`);
+    } catch (error) {
+      console.error('Failed to create game session:', error);
+      alert('Fehler beim Erstellen des Spiels. Bitte versuche es erneut.');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (

@@ -114,24 +114,41 @@ export default function HostGamePage() {
     if (phase === 'question' && session?.players && currentQuestion) {
       session.players.forEach((player, index) => {
         setTimeout(() => {
-          const randomAnswerIndex = Math.floor(Math.random() * currentQuestion.answers.length);
-          const selectedAnswer = currentQuestion.answers[randomAnswerIndex];
-          const answer: PlayerAnswer = {
-            playerId: player.id,
-            playerAvatar: player.avatar,
-            playerNickname: player.nickname,
-            questionId: currentQuestion.id,
-            answerId: selectedAnswer.id,
-            timeTaken: Math.random() * currentQuestion.timeLimit,
-            pointsEarned: selectedAnswer.isCorrect ? Math.floor(Math.random() * 500) + 500 : 0,
-            isCorrect: selectedAnswer.isCorrect,
-          };
-          setPlayerAnswers(prev => [...prev, answer]);
-          setAnsweredCount(prev => prev + 1);
+          setPlayerAnswers(prev => {
+            // Prevent duplicates
+            if (prev.find(p => p.playerId === player.id)) return prev;
+
+            const randomAnswerIndex = Math.floor(Math.random() * currentQuestion.answers.length);
+            const selectedAnswer = currentQuestion.answers[randomAnswerIndex];
+            const pointsEarned = selectedAnswer.isCorrect ? Math.floor(Math.random() * 500) + 500 : 0;
+            const answer: PlayerAnswer = {
+              playerId: player.id,
+              playerAvatar: player.avatar,
+              playerNickname: player.nickname,
+              questionId: currentQuestion.id,
+              answerId: selectedAnswer.id,
+              timeTaken: Math.random() * currentQuestion.timeLimit,
+              pointsEarned,
+              isCorrect: selectedAnswer.isCorrect,
+            };
+
+            // Update player score in session
+            if (pointsEarned > 0) {
+              const updatedPlayers = session.players.map(p =>
+                p.id === player.id ? { ...p, score: p.score + pointsEarned } : p
+              );
+              const updatedSession = { ...session, players: updatedPlayers };
+              setSession(updatedSession);
+              saveSession(updatedSession);
+            }
+
+            setAnsweredCount(prev.length + 1);
+            return [...prev, answer];
+          });
         }, (index + 1) * 800 + Math.random() * 1000);
       });
     }
-  }, [phase, session?.players, currentQuestion]);
+  }, [phase, session, currentQuestion, setSession]);
 
   const handleTimeUp = useCallback(() => {
     setPhase('results');
