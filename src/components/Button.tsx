@@ -1,14 +1,18 @@
 'use client';
 
 import { motion } from 'framer-motion';
-import { ButtonHTMLAttributes, ReactNode } from 'react';
+import { ReactNode } from 'react';
 
-interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
+interface ButtonProps {
   children: ReactNode;
   variant?: 'primary' | 'secondary' | 'outline' | 'ghost';
   size?: 'sm' | 'md' | 'lg' | 'xl';
   fullWidth?: boolean;
   loading?: boolean;
+  disabled?: boolean;
+  className?: string;
+  onClick?: () => void;
+  type?: 'button' | 'submit' | 'reset';
 }
 
 export function Button({
@@ -19,7 +23,8 @@ export function Button({
   loading = false,
   className = '',
   disabled,
-  ...props
+  onClick,
+  type = 'button',
 }: ButtonProps) {
   const baseStyles = 'font-bold rounded-xl transition-all duration-200 flex items-center justify-center gap-2';
 
@@ -50,7 +55,8 @@ export function Button({
         ${className}
       `}
       disabled={disabled || loading}
-      {...props}
+      onClick={onClick}
+      type={type}
     >
       {loading && (
         <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
